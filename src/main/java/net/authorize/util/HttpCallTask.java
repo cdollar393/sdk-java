@@ -21,11 +21,10 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.DefaultHttpClient;
 //import net.authorize.api.controller.base.ErrorResponse;
 
 /**
- * Callable task to make http calls in future 
+ * Callable task to make http calls in future
  * @author ramittal
  *
  */
@@ -36,14 +35,14 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
 	ANetApiRequest request = null;
 	@SuppressWarnings("rawtypes")
 	Class classType = null;
-	
+
 	//private static ANetApiResponse errorResponse = null;
 	private Message errorMessage = null;
 
 	/**
 	 * Creates task to be called in future for making http call
-	 * @param env  Env to point to 
-	 * @param request  Http request to send 
+	 * @param env  Env to point to
+	 * @param request  Http request to send
 	 * @param classType  Expected response type if successful
 	 */
     public <T> HttpCallTask(Environment env, ANetApiRequest request, Class<T> classType) {
@@ -57,24 +56,24 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
     /**
      * Makes a http call, using the proxy if requested, and returns apiresponse
      * with error code set appropriately
-     * @return ANetApiResponse  successful or failed response 
+     * @return ANetApiResponse  successful or failed response
      */
 	public ANetApiResponse call() throws Exception {
 		ANetApiResponse response = null;
 		StringBuilder buffer = new StringBuilder();
-		
-		DefaultHttpClient httpCaller = null;
-		
+
+		org.apache.http.client.HttpClient httpCaller = null;
+
         try {
             HttpPost httppost = HttpUtility.createPostRequest(this.env, this.request);
-            httpCaller = new DefaultHttpClient();
+			httpCaller = HttpClient.getHttpsClient();
 			HttpClient.setProxyIfRequested(httpCaller);
             HttpResponse httpResponse = httpCaller.execute(httppost);
 
-			if ( null != httpResponse) { 
-				if ( null != httpResponse.getStatusLine()) { 
+			if ( null != httpResponse) {
+				if ( null != httpResponse.getStatusLine()) {
 					if ( 200 == httpResponse.getStatusLine().getStatusCode()) {
-				
+
 						HttpEntity entity = httpResponse.getEntity();
 						// get the raw data being received
 						InputStream instream = entity.getContent();
@@ -86,9 +85,9 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
 			// handle HTTP errors
 			if (0 == buffer.length()) {
 				response = createErrorResponse(httpResponse, null);
-			} else { // i.e. if ( StringUtils.isNotEmpty(buffer.toString())) 
+			} else { // i.e. if ( StringUtils.isNotEmpty(buffer.toString()))
 				Object localResponse = null;
-				
+
 				try {
 					localResponse = XmlUtility.create(buffer.toString(), this.classType);
 				} catch(UnmarshalException ume) {
@@ -101,10 +100,10 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
 				} catch(JAXBException jabex) {
 					response = createErrorResponse(httpResponse, jabex);
 				}
-				
+
 				//ObjectFactory factory = new ObjectFactory();
 				//JAXBElement<ANetApiResponse> error = factory.createErrorResponse();
-			    
+
 				//check if error
 				if ( null == localResponse) {
 					try {
@@ -144,10 +143,10 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
 		List<Message> messages = response.getMessages().getMessage();
 		//clear all messages
 		messages.clear();
-		
+
 		setErrorResponse(messages, httpResponse);
 		setErrorResponse(messages, exception);
-		
+
 		return response;
 	}
 
@@ -176,7 +175,7 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
 			code = exception.getClass().getCanonicalName();
 			//code = exception.getClass().getTypeName();// requires java1.8
 			text = exception.getMessage();
-			
+
 			setErrorMessageValues(code, text);
 		}
 	}
@@ -186,4 +185,4 @@ public class HttpCallTask implements Callable<ANetApiResponse> {
 		errorMessage.setText(text);
 		LogHelper.warn(logger, "Adding ErrorMessage: Code: '%s', Text: '%s'", code, text);
 	}
-}	
+}

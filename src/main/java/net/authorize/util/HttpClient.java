@@ -7,26 +7,34 @@ import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.security.KeyStore;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+
+import net.authorize.Environment;
+import net.authorize.ResponseField;
+import net.authorize.Transaction;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.params.ConnRoutePNames;
+import org.apache.http.conn.socket.LayeredConnectionSocketFactory;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.client.LaxRedirectStrategy;
 import org.apache.http.params.CoreProtocolPNames;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.protocol.HTTP;
-
-import net.authorize.Environment;
-import net.authorize.ResponseField;
-import net.authorize.Transaction;
 
 
 /**
@@ -35,7 +43,7 @@ import net.authorize.Transaction;
  */
 public class HttpClient {
 	private static Log logger = LogFactory.getLog(HttpClient.class);
-	
+
 	public static final String ENCODING = "UTF-8";
 	static boolean proxySet = false;
 
@@ -44,10 +52,10 @@ public class HttpClient {
 	static int ProxyPort = Environment.getIntProperty(Constants.HTTPS_PROXY_PORT);
 	static int httpConnectionTimeout = Environment.getIntProperty(Constants.HTTP_CONNECTION_TIME_OUT);
 	static int httpReadTimeout = Environment.getIntProperty(Constants.HTTP_READ_TIME_OUT);
-			
+
 	static {
 		LogHelper.info(logger, "Use Proxy: '%s'", UseProxy);
-		
+
 		httpConnectionTimeout = (httpConnectionTimeout == 0 ? Constants.HTTP_CONNECTION_TIME_OUT_DEFAULT_VALUE : httpConnectionTimeout );
 		httpReadTimeout = (httpReadTimeout == 0 ? Constants.HTTP_READ_TIME_OUT_DEFAULT_VALUE : httpReadTimeout);
 	}
@@ -78,12 +86,12 @@ public class HttpClient {
   		    httpPost = new HttpPost(postUrl);
 
             httpPost.getParams().setBooleanParameter(CoreProtocolPNames.USE_EXPECT_CONTINUE, false);
-            
+
 			//set the tcp connection timeout
 			httpPost.getParams().setIntParameter(HttpConnectionParams.CONNECTION_TIMEOUT, httpConnectionTimeout);
 			//set the time out on read-data request
 			httpPost.getParams().setIntParameter(HttpConnectionParams.SO_TIMEOUT, httpReadTimeout);
-            
+
 		    httpPost.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
 		    httpPost.setEntity(new StringEntity(transaction.toNVPString(), HTTP.UTF_8));
 		} else if (transaction instanceof net.authorize.arb.Transaction ||
@@ -124,7 +132,7 @@ public class HttpClient {
 				transaction instanceof net.authorize.sim.Transaction) {
 
 			String decodedResponseData = URLDecoder.decode(responseString, HTTP.UTF_8);
-			
+
 
 			responseMap = ResponseParser.parseResponseString(decodedResponseData);
 		}
@@ -144,7 +152,7 @@ public class HttpClient {
 
 		if(environment != null && transaction != null) {
 			try {
-				DefaultHttpClient httpClient = new DefaultHttpClient();
+				org.apache.http.client.HttpClient httpClient = getHttpsClient();
 
 				setProxyIfRequested(httpClient);
 
@@ -174,7 +182,7 @@ public class HttpClient {
 				httpClient.getConnectionManager().shutdown();
 
 				String cleanResponseString = XmlUtility.descapeStringForXml(rawResponseString);
-				
+
 				responseMap = HttpClient.createResponseMap(transaction, cleanResponseString);
 			} catch (Exception e) {
 				LogHelper.warn(logger, "Exception getting response: '%s': '%s', '%s'", e.getMessage(), e.getCause(), Arrays.toString(e.getStackTrace()));
@@ -234,10 +242,10 @@ public class HttpClient {
 
 		if(environment != null && transaction != null) {
 			try {
-				DefaultHttpClient httpClient = new DefaultHttpClient();
+				org.apache.http.client.HttpClient httpClient = getHttpsClient();
 
 				setProxyIfRequested(httpClient);
-				
+
 				// create the HTTP POST object
 				HttpPost httpPost = createHttpPost(environment, transaction);
 
@@ -299,10 +307,10 @@ public class HttpClient {
 	}
 
 	/**
-	 * if proxy use is requested, set http-client appropriately 
-	 * @param httpClient the client to add proxy values to 
+	 * if proxy use is requested, set http-client appropriately
+	 * @param httpClient the client to add proxy values to
 	 */
-	public static void setProxyIfRequested(DefaultHttpClient httpClient) {
+	public static void setProxyIfRequested(org.apache.http.client.HttpClient httpClient) {
 		if ( UseProxy)
 		{
 			if ( !proxySet) {
@@ -311,6 +319,35 @@ public class HttpClient {
 			}
 			HttpHost proxyHttpHost = new HttpHost(ProxyHost, ProxyPort, Constants.PROXY_PROTOCOL);
 			httpClient.getParams().setParameter( ConnRoutePNames.DEFAULT_PROXY, proxyHttpHost);
+		}
+	}
+
+	private static SSLContext getSSLContext() {
+		try {
+			final SSLContext sc = SSLContext.getInstance("TLSv1.2");
+			final TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+			trustManagerFactory.init((KeyStore) null);
+			sc.init(null, trustManagerFactory.getTrustManagers(), new java.security.SecureRandom());
+			return sc;
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		}
+	}
+
+	static org.apache.http.client.HttpClient getHttpsClient() throws Exception {
+		SSLContext sslcontext = getSSLContext();
+		try {
+			LayeredConnectionSocketFactory sslSocketFactory = new org.apache.http.conn.ssl.SSLConnectionSocketFactory(sslcontext, SSLConnectionSocketFactory.STRICT_HOSTNAME_VERIFIER);
+			RequestConfig requestConfig = RequestConfig.custom().setConnectTimeout(httpConnectionTimeout).build();
+			return HttpClients.custom()
+					.setSSLSocketFactory(sslSocketFactory)
+					.setDefaultRequestConfig(requestConfig)
+					.setRedirectStrategy(new LaxRedirectStrategy())
+					.build();
+		} catch (Exception e) {
+			return null;
 		}
 	}
 }
